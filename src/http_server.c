@@ -17,7 +17,7 @@
 
 #define HTTP_PORT 80
 #define REQ_BUFFER_SIZE 1024
-#define RESP_BUFFER_SIZE 6000
+#define RESP_BUFFER_SIZE 9000
 
 typedef struct {
     char *response;
@@ -216,13 +216,23 @@ static void parse_request_and_update(const char *req) {
 static int build_page(char *out, size_t out_len) {
     size_t used = 0;
 
+    wifi_manager_metrics_t metrics = {0};
+    wifi_manager_get_metrics(&metrics);
+
     const bool ap_mode = wifi_manager_is_ap_mode();
     const char *wifi_mode = ap_mode ? "AP Setup" : "Station";
     const char *ip_text = wifi_manager_get_ip_string();
+    const char *link_text = wifi_manager_link_status_name(metrics.link_status);
+
+    char rssi_text[32] = "N/A";
+    if (metrics.rssi_valid) {
+        snprintf(rssi_text, sizeof(rssi_text), "%ld dBm", (long)metrics.rssi_dbm);
+    }
 
     if (append_text(out, &used, out_len,
                     "<!doctype html><html><head><meta charset='utf-8'>"
                     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+                    "<meta http-equiv='refresh' content='5'>"
                     "<title>Pico Lights</title>"
                     "<style>"
                     ":root{--bg:#f2efe7;--paper:#fffdf8;--ink:#1f2937;--on:#0f766e;--off:#b91c1c;--muted:#6b7280;--tog:#1d4ed8;--rst:#7c3aed;--ok:#065f46;--warn:#92400e;}"
@@ -243,6 +253,10 @@ static int build_page(char *out, size_t out_len) {
                     "a.reset-all{display:block;margin-top:12px;text-align:center;padding:12px;border-radius:12px;text-decoration:none;font-weight:700;color:#fff;background:var(--rst);}"
                     ".wifi-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}"
                     ".wifi-grid input{width:100%;padding:10px;border:1px solid #d6cfbf;border-radius:10px;font-size:1rem;}"
+                    ".stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:10px;}"
+                    ".stat{background:#fff;border:1px solid #e6dfcf;border-radius:10px;padding:10px;}"
+                    ".k{font-size:.82rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}"
+                    ".v{font-size:1.05rem;font-weight:700;margin-top:4px;}"
                     ".wifi-actions{display:flex;gap:10px;margin-top:10px;}"
                     ".save{background:#065f46}.wipe{background:#b91c1c}"
                     "@media (max-width:760px){.wifi-grid{grid-template-columns:1fr}.wifi-actions{flex-direction:column}}"
@@ -266,6 +280,28 @@ static int build_page(char *out, size_t out_len) {
     }
 
     if (append_text(out, &used, out_len, "</div>") < 0) {
+        return -1;
+    }
+
+    if (append_fmt(out,
+                   &used,
+                   out_len,
+                   "<section class='section'><h2>Connection Metrics</h2><p>Auto-refresh every 5 seconds.</p>"
+                   "<div class='stats'>"
+                   "<div class='stat'><div class='k'>Link Status</div><div class='v'>%s (%d)</div></div>"
+                   "<div class='stat'><div class='k'>RSSI</div><div class='v'>%s</div></div>"
+                   "<div class='stat'><div class='k'>Reconnect Attempts</div><div class='v'>%lu</div></div>"
+                   "<div class='stat'><div class='k'>Reconnect Successes</div><div class='v'>%lu</div></div>"
+                   "<div class='stat'><div class='k'>Disconnect Events</div><div class='v'>%lu</div></div>"
+                   "<div class='stat'><div class='k'>STA Power Save</div><div class='v'>%s</div></div>"
+                   "</div></section>",
+                   link_text,
+                   metrics.link_status,
+                   rssi_text,
+                   (unsigned long)metrics.reconnect_attempts,
+                   (unsigned long)metrics.reconnect_successes,
+                   (unsigned long)metrics.disconnect_events,
+                   metrics.sta_power_save_disabled ? "Disabled" : "Enabled/Unknown") < 0) {
         return -1;
     }
 
